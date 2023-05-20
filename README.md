@@ -1,4 +1,7 @@
-# diffusers_plus
-Diffusers with no token number limitation, support custom model, support local lora, and upscale. 
+# Diffusers Plus
+## A toolkit to enhance Diffusers
 
-code coming soon
+* Diffusers with no token number limitation
+* Support custom model
+* Support local LoRA
+* Upscale. 
