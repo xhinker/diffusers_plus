@@ -127,3 +127,18 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+gitsync.*
+
+.vscode/
+
+dist/
+
+gitsync.sh
+gitsync.ps1
+publish.sh
+publish.ps1
+
+test/
+
+usage_examples/*.csv
