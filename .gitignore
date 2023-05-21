@@ -142,3 +142,5 @@ publish.ps1
 test/
 
 usage_examples/*.csv
+
+az_tests/
