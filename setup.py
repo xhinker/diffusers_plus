@@ -2,7 +2,7 @@ from setuptools import setup,find_packages
 
 setup(
     name='diffusers_plus',
-    version='1.230521.1',
+    version='1.230521.2',
     license='Apache License',
     author="Andrew Zhu",
     author_email='xhinker@hotmail.com',
