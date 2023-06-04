@@ -1,4 +1,4 @@
-# Diffusers Plus
+# Diffusers Plus (in progress)
 ## A toolkit to enhance Diffusers
 
 * Diffusers with no token number limitation
