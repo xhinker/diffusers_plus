@@ -11,6 +11,8 @@ setup(
     url='https://github.com/xhinker/diffusers_plus',
     keywords='diffusers stable-diffusion',
     install_requires=[
-        'diffusers'
+        'transformers'
+        ,'diffusers'
+        , 'opencv-python'
     ],
 )

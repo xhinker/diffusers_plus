@@ -144,3 +144,5 @@ test/
 usage_examples/*.csv
 
 az_tests/
+
+.pth
