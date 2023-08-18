@@ -202,7 +202,7 @@ def load_textual_inversion_sdxl(
     '''
     Use this function to load textual inversion model in model initilization stage 
     or image generation stage. 
-    Works for Stable Diffusion v1.5 based model
+    Works for Stable Diffusion XL based model
     '''
     tokenizer_1,tokenizer_2 = pipe.tokenizer, pipe.tokenizer_2
     text_encoder_1, text_encoder_2 = pipe.text_encoder, pipe.text_encoder_2
@@ -252,7 +252,6 @@ def load_textual_inversion_sdxl(
     # resize the token embeddings
     text_encoder_1.resize_token_embeddings(len(tokenizer_1))
     text_encoder_2.resize_token_embeddings(len(tokenizer_2))
-    
     
     # get the id for the token and assign the embeds
     token_id_1 = tokenizer_1.convert_tokens_to_ids(token)

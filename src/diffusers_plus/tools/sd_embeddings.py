@@ -2,6 +2,7 @@ from .prompt_parser import parse_prompt_attention
 from transformers import CLIPTokenizer
 from diffusers import StableDiffusionPipeline
 import torch
+from diffusers import StableDiffusionXLPipeline
 
 def get_prompts_tokens_with_weights(
     clip_tokenizer: CLIPTokenizer
@@ -242,7 +243,6 @@ def get_weighted_text_embeddings_v15(
     return prompt_embeds, neg_prompt_embeds
 
 
-from diffusers import StableDiffusionXLPipeline
 def get_weighted_text_embeddings_sdxl(
     pipe: StableDiffusionXLPipeline
     , prompt : str      = ""
@@ -484,6 +484,285 @@ def get_weighted_text_embeddings_sdxl(
                 )
                 
         neg_token_embedding = neg_token_embedding.unsqueeze(0)
+        neg_embeds.append(neg_token_embedding)
+    
+    prompt_embeds           = torch.cat(embeds, dim = 1)
+    negative_prompt_embeds  = torch.cat(neg_embeds, dim = 1)
+    
+    return prompt_embeds, negative_prompt_embeds, pooled_prompt_embeds, negative_pooled_prompt_embeds
+
+def get_weighted_text_embeddings_sdxl_2p(
+    pipe: StableDiffusionXLPipeline
+    , prompt : str      = ""
+    , prompt_2 : str    = None
+    , neg_prompt: str   = ""
+    , neg_prompt_2: str = None
+):
+    """
+    This function can process long prompt with weights, no length limitation 
+    for Stable Diffusion XL
+    
+    Args:
+        pipe (StableDiffusionPipeline)
+        prompt (str)
+        neg_prompt (str)
+    Returns:
+        prompt_embeds (torch.Tensor)
+        neg_prompt_embeds (torch.Tensor)
+    
+    Example:
+        from diffusers import StableDiffusionPipeline
+        text2img_pipe = StableDiffusionPipeline.from_pretrained(
+            "stablediffusionapi/deliberate-v2"
+            , torch_dtype = torch.float16
+            , safety_checker = None
+        ).to("cuda:0")
+        prompt_embeds, neg_prompt_embeds = get_weighted_text_embeddings_v15(
+            pipe = text2img_pipe
+            , prompt = "a (white) cat" 
+            , neg_prompt = "blur"
+        )
+        image = text2img_pipe(
+            prompt_embeds = prompt_embeds
+            , negative_prompt_embeds = neg_prompt_embeds
+            , generator = torch.Generator(text2img_pipe.device).manual_seed(2)
+        ).images[0]
+    """
+    prompt_2        = prompt_2 or prompt
+    neg_prompt_2    = neg_prompt_2 or neg_prompt
+    
+    import math
+    eos = pipe.tokenizer.eos_token_id 
+    
+    # tokenizer 1
+    prompt_tokens, prompt_weights = get_prompts_tokens_with_weights(
+        pipe.tokenizer, prompt
+    )
+
+    neg_prompt_tokens, neg_prompt_weights = get_prompts_tokens_with_weights(
+        pipe.tokenizer, neg_prompt
+    )
+    
+    # tokenizer 2
+    prompt_tokens_2, prompt_weights_2 = get_prompts_tokens_with_weights(
+        pipe.tokenizer_2, prompt_2
+    )
+
+    neg_prompt_tokens_2, neg_prompt_weights_2 = get_prompts_tokens_with_weights(
+        pipe.tokenizer_2, neg_prompt_2
+    )
+    
+    # padding the shorter one
+    prompt_token_len        = len(prompt_tokens)
+    neg_prompt_token_len    = len(neg_prompt_tokens)
+    
+    if prompt_token_len > neg_prompt_token_len:
+        # padding the neg_prompt with eos token
+        neg_prompt_tokens   = (
+            neg_prompt_tokens  + 
+            [eos] * abs(prompt_token_len - neg_prompt_token_len)
+        )
+        neg_prompt_weights  = (
+            neg_prompt_weights + 
+            [1.0] * abs(prompt_token_len - neg_prompt_token_len)
+        )
+    else:
+        # padding the prompt
+        prompt_tokens       = (
+            prompt_tokens  
+            + [eos] * abs(prompt_token_len - neg_prompt_token_len)
+        )
+        prompt_weights      = (
+            prompt_weights 
+            + [1.0] * abs(prompt_token_len - neg_prompt_token_len)
+        )
+    
+    # padding the shorter one for token set 2
+    prompt_token_len_2        = len(prompt_tokens_2)
+    neg_prompt_token_len_2    = len(neg_prompt_tokens_2)
+    
+    if prompt_token_len_2 > neg_prompt_token_len_2:
+        # padding the neg_prompt with eos token
+        neg_prompt_tokens_2   = (
+            neg_prompt_tokens_2  + 
+            [eos] * abs(prompt_token_len_2 - neg_prompt_token_len_2)
+        )
+        neg_prompt_weights_2  = (
+            neg_prompt_weights_2 + 
+            [1.0] * abs(prompt_token_len_2 - neg_prompt_token_len_2)
+        )
+    else:
+        # padding the prompt
+        prompt_tokens_2       = (
+            prompt_tokens_2  
+            + [eos] * abs(prompt_token_len_2 - neg_prompt_token_len_2)
+        )
+        prompt_weights_2      = (
+            prompt_weights_2
+            + [1.0] * abs(prompt_token_len_2 - neg_prompt_token_len_2)
+        )
+    
+    # now, need to ensure prompt and prompt_2 has the same lemgth
+    prompt_token_len        = len(prompt_tokens)
+    prompt_token_len_2      = len(prompt_tokens_2)
+    if prompt_token_len > prompt_token_len_2:
+        prompt_tokens_2     = prompt_tokens_2   + [eos] * abs(prompt_token_len - prompt_token_len_2)
+        prompt_weights_2    = prompt_weights_2  + [1.0] * abs(prompt_token_len - prompt_token_len_2)
+    else:
+        prompt_tokens       = prompt_tokens     + [eos] * abs(prompt_token_len - prompt_token_len_2)
+        prompt_weights      = prompt_weights    + [1.0] * abs(prompt_token_len - prompt_token_len_2)
+    
+    # now, need to ensure neg_prompt and net_prompt_2 has the same lemgth
+    neg_prompt_token_len        = len(neg_prompt_tokens)
+    neg_prompt_token_len_2      = len(neg_prompt_tokens_2)
+    if neg_prompt_token_len > neg_prompt_token_len_2:
+        neg_prompt_tokens_2     = neg_prompt_tokens_2   + [eos] * abs(neg_prompt_token_len - neg_prompt_token_len_2)
+        neg_prompt_weights_2    = neg_prompt_weights_2  + [1.0] * abs(neg_prompt_token_len - neg_prompt_token_len_2)
+    else:
+        neg_prompt_tokens       = neg_prompt_tokens     + [eos] * abs(neg_prompt_token_len - neg_prompt_token_len_2)
+        neg_prompt_weights      = neg_prompt_weights    + [1.0] * abs(neg_prompt_token_len - neg_prompt_token_len_2)
+    
+    print("prompt_token_len:", len(prompt_tokens))
+    print("prompt_token_len_2:", len(prompt_tokens))
+    
+    print("neg_prompt_token_len:", len(neg_prompt_tokens))
+    print("neg_prompt_token_len_2:", len(neg_prompt_tokens_2))
+    
+    embeds = []
+    neg_embeds = []
+    
+    prompt_token_groups, prompt_weight_groups = group_tokens_and_weights(
+        prompt_tokens.copy()
+        , prompt_weights.copy()
+    )
+    
+    neg_prompt_token_groups, neg_prompt_weight_groups = group_tokens_and_weights(
+        neg_prompt_tokens.copy()
+        , neg_prompt_weights.copy()
+    )
+    
+    prompt_token_groups_2, prompt_weight_groups_2 = group_tokens_and_weights(
+        prompt_tokens_2.copy()
+        , prompt_weights_2.copy()
+    )
+    
+    neg_prompt_token_groups_2, neg_prompt_weight_groups_2 = group_tokens_and_weights(
+        neg_prompt_tokens_2.copy()
+        , neg_prompt_weights_2.copy()
+    )
+        
+    # get prompt embeddings one by one is not working. 
+    for i in range(len(prompt_token_groups)):
+        # get positive prompt embeddings with weights
+        token_tensor = torch.tensor(
+            [prompt_token_groups[i]]
+            ,dtype = torch.long, device = pipe.device
+        )
+        weight_tensor = torch.tensor(
+            prompt_weight_groups[i]
+            , device    = pipe.device
+        )
+        
+        token_tensor_2 = torch.tensor(
+            [prompt_token_groups_2[i]]
+            , device = pipe.device
+        )
+        
+        weight_tensor_2 = torch.tensor(
+            prompt_weight_groups_2[i]
+            , device    = pipe.device
+        )
+        
+        # use first text encoder
+        prompt_embeds_1 = pipe.text_encoder(
+            token_tensor.to(pipe.device)
+            , output_hidden_states = True
+        )
+        prompt_embeds_1_hidden_states = prompt_embeds_1.hidden_states[-2]
+
+        # use second text encoder
+        prompt_embeds_2 = pipe.text_encoder_2(
+            token_tensor_2.to(pipe.device)
+            , output_hidden_states = True
+        )
+        prompt_embeds_2_hidden_states = prompt_embeds_2.hidden_states[-2]
+        pooled_prompt_embeds = prompt_embeds_2[0]
+        
+        prompt_embeds_1_hidden_states = prompt_embeds_1_hidden_states.squeeze(0)
+        prompt_embeds_2_hidden_states = prompt_embeds_2_hidden_states.squeeze(0)
+        
+        for j in range(len(weight_tensor)):
+            if weight_tensor[j] != 1.0:
+                prompt_embeds_1_hidden_states[j] = (
+                    prompt_embeds_1_hidden_states[-1] + (prompt_embeds_1_hidden_states[j] - prompt_embeds_1_hidden_states[-1]) * weight_tensor[j]
+                )
+            
+            if weight_tensor_2[j] != 1.0:
+                prompt_embeds_2_hidden_states[j] = (
+                    prompt_embeds_2_hidden_states[-1] + (prompt_embeds_2_hidden_states[j] - prompt_embeds_2_hidden_states[-1]) * weight_tensor_2[j]
+                )
+                              
+        prompt_embeds_1_hidden_states = prompt_embeds_1_hidden_states.unsqueeze(0)
+        prompt_embeds_2_hidden_states = prompt_embeds_2_hidden_states.unsqueeze(0)
+        
+        prompt_embeds_list = [prompt_embeds_1_hidden_states, prompt_embeds_2_hidden_states]
+        token_embedding = torch.cat(prompt_embeds_list, dim=-1)
+        
+        embeds.append(token_embedding)
+        
+        # get negative prompt embeddings with weights
+        neg_token_tensor = torch.tensor(
+            [neg_prompt_token_groups[i]]
+            , device = pipe.device
+        )
+        neg_token_tensor_2 = torch.tensor(
+            [neg_prompt_token_groups_2[i]]
+            , device = pipe.device
+        )
+        neg_weight_tensor = torch.tensor(
+            neg_prompt_weight_groups[i]
+            , device    = pipe.device
+        )
+        neg_weight_tensor_2 = torch.tensor(
+            neg_prompt_weight_groups_2[i]
+            , device    = pipe.device
+        )
+        
+        # use first text encoder
+        neg_prompt_embeds_1 = pipe.text_encoder(
+            neg_token_tensor.to(pipe.device)
+            , output_hidden_states=True
+        )
+        neg_prompt_embeds_1_hidden_states = neg_prompt_embeds_1.hidden_states[-2]
+
+        # use second text encoder
+        neg_prompt_embeds_2 = pipe.text_encoder_2(
+            neg_token_tensor_2.to(pipe.device)
+            , output_hidden_states=True
+        )
+        neg_prompt_embeds_2_hidden_states = neg_prompt_embeds_2.hidden_states[-2]
+        negative_pooled_prompt_embeds = neg_prompt_embeds_2[0]
+        
+        neg_prompt_embeds_1_hidden_states = neg_prompt_embeds_1_hidden_states.squeeze(0)
+        neg_prompt_embeds_2_hidden_states = neg_prompt_embeds_2_hidden_states.squeeze(0)
+        
+        for z in range(len(neg_weight_tensor)):
+            if neg_weight_tensor[z] != 1.0:
+                neg_prompt_embeds_1_hidden_states[z] = (
+                    neg_prompt_embeds_1_hidden_states[-1] + (neg_prompt_embeds_1_hidden_states[z] - neg_prompt_embeds_1_hidden_states[-1]) * neg_weight_tensor[z]
+                )
+            
+            if neg_weight_tensor_2[z] != 1.0:
+                neg_prompt_embeds_2_hidden_states[z] = (
+                    neg_prompt_embeds_2_hidden_states[-1] + (neg_prompt_embeds_2_hidden_states[z] - neg_prompt_embeds_2_hidden_states[-1]) * neg_weight_tensor_2[z]
+                )
+        
+        neg_prompt_embeds_1_hidden_states = neg_prompt_embeds_1_hidden_states.unsqueeze(0)
+        neg_prompt_embeds_2_hidden_states = neg_prompt_embeds_2_hidden_states.unsqueeze(0)
+
+        neg_prompt_embeds_list = [neg_prompt_embeds_1_hidden_states, neg_prompt_embeds_2_hidden_states]
+        neg_token_embedding = torch.cat(neg_prompt_embeds_list, dim=-1)
+        
         neg_embeds.append(neg_token_embedding)
     
     prompt_embeds           = torch.cat(embeds, dim = 1)
