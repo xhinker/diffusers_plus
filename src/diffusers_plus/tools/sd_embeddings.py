@@ -412,12 +412,12 @@ def get_weighted_text_embeddings_sdxl(
         
         for j in range(len(weight_tensor)):
             if weight_tensor[j] != 1.0:
-                ow = weight_tensor[j] - 1
+                #ow = weight_tensor[j] - 1
                 
                 # optional process
                 # To map number of (0,1) to (-1,1)
-                tanh_weight = (math.exp(ow)/(math.exp(ow) + 1) - 0.5) * 2
-                weight = 1 + tanh_weight
+                # tanh_weight = (math.exp(ow)/(math.exp(ow) + 1) - 0.5) * 2
+                # weight = 1 + tanh_weight
                 
                 # add weight method 1:
                 # token_embedding[j] = token_embedding[j] * weight
@@ -426,9 +426,12 @@ def get_weighted_text_embeddings_sdxl(
                 # )
                 
                 # add weight method 2:
-                token_embedding[j] = (
-                    token_embedding[-1] + (token_embedding[j] - token_embedding[-1]) * weight_tensor[j]
-                )
+                # token_embedding[j] = (
+                #     token_embedding[-1] + (token_embedding[j] - token_embedding[-1]) * weight_tensor[j]
+                # )
+                
+                # add weight method 3:
+                token_embedding[j] = token_embedding[j] * weight_tensor[j]
 
         token_embedding = token_embedding.unsqueeze(0)
         embeds.append(token_embedding)
@@ -469,8 +472,8 @@ def get_weighted_text_embeddings_sdxl(
         for z in range(len(neg_weight_tensor)):
             if neg_weight_tensor[z] != 1.0:
                 
-                ow = neg_weight_tensor[z] - 1
-                #neg_weight = 1 + (math.exp(ow)/(math.exp(ow) + 1) - 0.5) * 2
+                # ow = neg_weight_tensor[z] - 1
+                # neg_weight = 1 + (math.exp(ow)/(math.exp(ow) + 1) - 0.5) * 2
                 
                 # add weight method 1:
                 # neg_token_embedding[z] = neg_token_embedding[z] * neg_weight
@@ -479,9 +482,12 @@ def get_weighted_text_embeddings_sdxl(
                 # )
                 
                 # add weight method 2:
-                neg_token_embedding[z] = (
-                    neg_token_embedding[-1] + (neg_token_embedding[z] - neg_token_embedding[-1]) * neg_weight_tensor[z]
-                )
+                # neg_token_embedding[z] = (
+                #     neg_token_embedding[-1] + (neg_token_embedding[z] - neg_token_embedding[-1]) * neg_weight_tensor[z]
+                # )
+                
+                # add weight method 3:
+                neg_token_embedding[z] = neg_token_embedding[z] * neg_weight_tensor[z]
                 
         neg_token_embedding = neg_token_embedding.unsqueeze(0)
         neg_embeds.append(neg_token_embedding)

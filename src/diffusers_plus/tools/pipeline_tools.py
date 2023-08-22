@@ -95,6 +95,92 @@ def load_lora_to_model(
 
     # return pipeline
     
+def load_lora_to_sdxl_model(
+    pipeline
+    ,lora_path
+    ,lora_weight_delta = 0.5
+    ,device = 'cpu'
+):
+    '''
+    For Stable Diffusion V1.5 based LoRA only, not working for SDXL
+    lora_weight_delta = new_weight - current_weight
+    '''
+    state_dict = load_file(lora_path, device=device)
+    LORA_PREFIX_UNET = 'lora_unet'
+    LORA_PREFIX_TEXT_ENCODER_1 = 'lora_te1'
+    LORA_PREFIX_TEXT_ENCODER_2 = 'lora_te2'
+
+    alpha = lora_weight_delta
+    visited = []
+
+    # directly update weight in diffusers model
+    for key in state_dict:
+        # as we have set the alpha beforehand, so just skip
+        if '.alpha' in key or key in visited:
+            continue
+            
+        if 'te1_text' in key:
+            layer_infos = key.split('.')[0].split(LORA_PREFIX_TEXT_ENCODER_1+'_')[-1].split('_')
+            curr_layer = pipeline.text_encoder
+        elif 'te2_text' in key: 
+            layer_infos = key.split('.')[0].split(LORA_PREFIX_TEXT_ENCODER_2+'_')[-1].split('_')
+            curr_layer = pipeline.text_encoder_2
+        else:
+            layer_infos = key.split('.')[0].split(LORA_PREFIX_UNET+'_')[-1].split('_')
+            curr_layer = pipeline.unet
+
+        # find the target layer
+        # loop through the layers to find the target layer
+        temp_name = layer_infos.pop(0)
+        while len(layer_infos) > -1:
+            try:
+                curr_layer = curr_layer.__getattr__(temp_name)
+                # no exception means the layer is found
+                if len(layer_infos) > 0:
+                    temp_name = layer_infos.pop(0)
+                # layer found but length is 0, 
+                # break the loop and curr_layer keep point to the current layer
+                elif len(layer_infos) == 0:
+                    break
+            except Exception:
+                if len(layer_infos) == 0:
+                    curr_layer = None
+                    break
+                # no such layer exist, pop next name and try again
+                if len(temp_name) > 0:
+                    temp_name += '_'+layer_infos.pop(0)
+                else:
+                    # temp_name is empty
+                    temp_name = layer_infos.pop(0)
+        
+        if curr_layer is None:
+            continue
+        
+        # org_forward(x) + lora_up(lora_down(x)) * multiplier
+        # ensure the sequence of lora_up(A) then lora_down(B)
+        pair_keys = []
+        if 'lora_down' in key:
+            pair_keys.append(key.replace('lora_down', 'lora_up'))
+            pair_keys.append(key)
+        else:
+            pair_keys.append(key)
+            pair_keys.append(key.replace('lora_up', 'lora_down'))
+        
+        # update weight
+        if len(state_dict[pair_keys[0]].shape) == 4:
+            # squeeze(3) and squeeze(2) remove dimensions of size 1 from the tensor to make the tensor more compact
+            weight_up = state_dict[pair_keys[0]].squeeze(3).squeeze(2).to(torch.float32)
+            weight_down = state_dict[pair_keys[1]].squeeze(3).squeeze(2).to(torch.float32)
+            curr_layer.weight.data += alpha * torch.mm(weight_up, weight_down).unsqueeze(2).unsqueeze(3)
+        else:
+            weight_up = state_dict[pair_keys[0]].to(torch.float32)
+            weight_down = state_dict[pair_keys[1]].to(torch.float32)
+            curr_layer.weight.data += alpha * torch.mm(weight_up, weight_down)
+            
+        # update visited list, ensure no duplicated weight is processed. 
+        for item in pair_keys:
+            visited.append(item)
+    
 
 from diffusers import StableDiffusionXLPipeline
 def load_lora_sdxl(
