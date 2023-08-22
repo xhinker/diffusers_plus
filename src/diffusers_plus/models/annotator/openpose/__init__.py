@@ -7,7 +7,7 @@ from . import util
 from .body import Body
 from .hand import Hand
 from .face import Face
-from annotator.util import annotator_ckpts_path
+from ..util import annotator_ckpts_path
 
 
 body_model_path = "https://huggingface.co/lllyasviel/Annotators/resolve/main/body_pose_model.pth"
