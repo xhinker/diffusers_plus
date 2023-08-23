@@ -9,6 +9,7 @@ from diffusers import (
     , DPMSolverMultistepScheduler
     , ControlNetModel
     , StableDiffusionXLControlNetPipeline
+    , StableDiffusionXLInpaintPipeline
 )
 from ..tools.sd_embeddings import get_weighted_text_embeddings_sdxl
 from ..tools.image_upscale import resize_img
@@ -38,6 +39,17 @@ def load_sdxl_img2img_pipe_from_file(model_path:str):
     )
     pipe.watermark = None
     return pipe
+
+def load_sdxl_inpaint_pipe_from_file(model_path:str = "stabilityai/stable-diffusion-xl-base-1.0"):
+    sdxl_inpaint = StableDiffusionXLInpaintPipeline.from_single_file(
+        model_path
+        , torch_dtype           = torch.float16
+        , variant               = "fp16"
+        , use_safetensors       = True
+        , load_safety_checker   = False
+    )
+    sdxl_inpaint.watermark = None
+    return sdxl_inpaint
 
 def load_sdxl_openpose_cn_pipe_from_pretrained(model_id:str = "RunDiffusion/RunDiffusion-XL-Beta"):
     sdxl_pose_controlnet = ControlNetModel.from_pretrained(
@@ -101,7 +113,7 @@ def sdxl_text2img(
     torch.cuda.empty_cache()
     return raw_image
 
-def sdxl_img2img_upscale(
+def sdxl_img2img(
     pipe
     , input_image
     , prompt:str
@@ -114,8 +126,12 @@ def sdxl_img2img_upscale(
     , scheduler = EulerDiscreteScheduler
 ):
     pipe.to("cuda")
-    resized_img = resize_img(input_image,resize_times)
-
+    
+    if resize_times > 1.0:
+        resized_img = resize_img(input_image,resize_times)
+    else:
+        resized_img = input_image
+    
     (
         prompt_embeds
         , prompt_neg_embeds
@@ -147,7 +163,53 @@ def sdxl_img2img_upscale(
 
     pipe.to("cpu")
     torch.cuda.empty_cache()
-    return image    , prompt_neg_embeds
+    return image
+
+def sdxl_inpaint(
+    pipe:StableDiffusionXLInpaintPipeline
+    , input_image
+    , mask_image
+    , prompt:str
+    , neg_prompt:str
+    , strength = 1.0
+    , seed = 1
+    , steps = 40
+    , cfg = 7.5
+    , scheduler = EulerDiscreteScheduler
+):
+    pipe.to("cuda")
+    (
+        prompt_embeds
+        , prompt_neg_embeds
+        , pooled_prompt_embeds
+        , negative_pooled_prompt_embeds
+    ) = get_weighted_text_embeddings_sdxl(
+        pipe
+        , prompt = prompt
+        , neg_prompt = neg_prompt
+    )
+    
+    pipe.scheduler = scheduler.from_config(pipe.scheduler.config)
+    
+    sdxl_inpaint_output = pipe(
+        prompt_embeds                   = prompt_embeds 
+        , negative_prompt_embeds        = prompt_neg_embeds 
+        , pooled_prompt_embeds          = pooled_prompt_embeds
+        , negative_pooled_prompt_embeds = negative_pooled_prompt_embeds
+        , image                         = input_image
+        , mask_image                    = mask_image
+        , num_inference_steps           = steps
+        , guidance_scale                = cfg
+        , strength                      = strength
+        , width                         = input_image.size[0]
+        , height                        = input_image.size[1]
+        , generator                     = torch.Generator("cuda:0").manual_seed(seed) 
+    ).images[0]
+    pipe.to("cpu")
+    torch.cuda.empty_cache()
+    
+    return sdxl_inpaint_output
+    
 
 def sdxl_controlnet(
     pipe
