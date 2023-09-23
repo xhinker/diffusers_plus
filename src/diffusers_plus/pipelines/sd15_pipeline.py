@@ -1,4 +1,6 @@
+from typing import Any, Callable, Dict, List, Optional, Union
 import torch
+from torch import Generator
 from diffusers import (
     StableDiffusionPipeline
     , ControlNetModel
@@ -22,7 +24,6 @@ def load_sd15_tile_cn_pipe_from_file(model_path:str):
     )
     
     return pipe
-
 
 def sd15_controlnet(
     pipe:StableDiffusionControlNetImg2ImgPipeline

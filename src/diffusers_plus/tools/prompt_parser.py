@@ -2,6 +2,8 @@ import re
 from collections import namedtuple
 from typing import List
 import lark
+import logging
+logger = logging.getLogger(__name__)
 
 # a prompt like this: "fantasy landscape with a [mountain:lake:0.25] and [an oak:a christmas tree:0.75][ in foreground::0.6][ in background:0.25] [shoddy:masterful:0.5]"
 # will be represented with prompt_schedule like this (assuming steps=100):
@@ -101,6 +103,41 @@ def get_learned_conditioning_prompt_schedules(prompts, steps):
 
     promptdict = {prompt: get_schedule(prompt) for prompt in set(prompts)}
     return [promptdict[prompt] for prompt in prompts]
+
+def parse_scheduled_prompts(text,steps=30):
+    '''
+    This function will handle scheduled and alternative prompt
+    '''
+    text = text.strip()
+    parse_result = None
+    try:
+        parse_result = get_learned_conditioning_prompt_schedules([text],steps=steps)[0]
+        logger.info(
+            f"parse_result from get_learned_conditioning_prompt_schedules function:\n {str(parse_result)}"
+        )
+    except Exception as e:
+        logger.error(f"Parse scheduled prompt error:\n {e}")
+
+    if len(parse_result) == 1:
+        # no scheduling
+        return parse_result
+    
+    prompts_list = []
+    
+    for i in range(steps):
+        current_prompt_step, current_prompt_content = parse_result[0][0],parse_result[0][1]
+        step = i + 1
+        if step < current_prompt_step:
+            prompts_list.append(current_prompt_content)
+            continue
+        
+        if step == current_prompt_step:
+            prompts_list.append(current_prompt_content)
+            parse_result.pop(0)
+        
+    return prompts_list
+
+
 
 
 ScheduledPromptConditioning = namedtuple("ScheduledPromptConditioning", ["end_at_step", "cond"])
