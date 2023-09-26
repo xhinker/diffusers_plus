@@ -210,7 +210,6 @@ def sdxl_inpaint(
     
     return sdxl_inpaint_output
     
-
 def sdxl_controlnet(
     pipe
     , control_images
@@ -223,7 +222,6 @@ def sdxl_controlnet(
     , scheduler = EulerDiscreteScheduler
     , controlnet_conditioning_scale = 0.5
 ):
-    
     if type(control_images) is not list:
         control_images = [control_images]
         
@@ -249,8 +247,8 @@ def sdxl_controlnet(
         , image                         = control_images
         , guidance_scale                = cfg
         , num_inference_steps           = steps
-        , generator = torch.Generator("cuda").manual_seed(seed)
-        #, latents                       = raw_image_us
+        , generator                     = torch.Generator("cuda").manual_seed(seed)
+        #, latents                      = raw_image_us
         , controlnet_conditioning_scale = controlnet_conditioning_scale
     ).images[0]
     

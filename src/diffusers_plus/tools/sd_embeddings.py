@@ -122,6 +122,7 @@ def get_weighted_text_embeddings_v15(
     , prompt : str      = ""
     , neg_prompt: str   = ""
     , pad_last_block    = False
+    , clip_skip:int     = 0
 ):
     """
     This function can process long prompt with weights, no length limitation 
@@ -153,6 +154,10 @@ def get_weighted_text_embeddings_v15(
             , generator = torch.Generator(text2img_pipe.device).manual_seed(2)
         ).images[0]
     """
+    original_clip_layers = pipe.text_encoder.text_model.encoder.layers
+    if clip_skip > 0:
+        pipe.text_encoder.text_model.encoder.layers = original_clip_layers[:-clip_skip]
+    
     eos = pipe.tokenizer.eos_token_id 
     prompt_tokens, prompt_weights = get_prompts_tokens_with_weights(
         pipe.tokenizer, prompt
@@ -213,6 +218,7 @@ def get_weighted_text_embeddings_v15(
             , dtype     = torch.float16
             , device    = pipe.device
         )
+        
         token_embedding = pipe.text_encoder(token_tensor)[0].squeeze(0) 
         for j in range(len(weight_tensor)):
             token_embedding[j] = token_embedding[j] * weight_tensor[j]
@@ -239,6 +245,10 @@ def get_weighted_text_embeddings_v15(
     
     prompt_embeds       = torch.cat(embeds, dim = 1)
     neg_prompt_embeds   = torch.cat(neg_embeds, dim = 1)
+    
+    # recover clip layers
+    if clip_skip > 0:
+        pipe.text_encoder.text_model.encoder.layers = original_clip_layers
     
     return prompt_embeds, neg_prompt_embeds
 
