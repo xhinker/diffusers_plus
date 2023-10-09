@@ -51,9 +51,12 @@ def load_sdxl_inpaint_pipe_from_file(model_path:str = "stabilityai/stable-diffus
     sdxl_inpaint.watermark = None
     return sdxl_inpaint
 
-def load_sdxl_openpose_cn_pipe_from_pretrained(model_id:str = "RunDiffusion/RunDiffusion-XL-Beta"):
+def load_sdxl_openpose_cn_pipe_from_pretrained(
+        base_model_id = "thibaud/controlnet-openpose-sdxl-1.0"
+        , model_id:str = "RunDiffusion/RunDiffusion-XL-Beta"
+    ):
     sdxl_pose_controlnet = ControlNetModel.from_pretrained(
-        "thibaud/controlnet-openpose-sdxl-1.0"
+        base_model_id
         , torch_dtype=torch.float16
     )
 

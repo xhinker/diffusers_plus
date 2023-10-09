@@ -9,6 +9,14 @@ from diffusers import (
 )
 from ..tools.sd_embeddings import get_weighted_text_embeddings_v15
 
+class SD15:
+    '''
+    An SD15 Instance that share all tokenizer, encoder, vae and unet. 
+    So that use the minium VRAM
+    '''
+    def __init__(self, model_path:str) -> None:
+        pass
+
 def load_sd15_tile_cn_pipe_from_file(model_path:str):
     controlnet = ControlNetModel.from_pretrained(
         'takuma104/control_v11'
@@ -16,12 +24,20 @@ def load_sd15_tile_cn_pipe_from_file(model_path:str):
         , torch_dtype=torch.float16
     )
     
-    pipe = StableDiffusionControlNetImg2ImgPipeline.from_single_file(
-        model_path
-        , torch_dtype           = torch.float16
-        , load_safety_checker   = False
-        , controlnet            = controlnet
-    )
+    if model_path.endswith(".safetensors"):
+        pipe = StableDiffusionControlNetImg2ImgPipeline.from_single_file(
+            model_path
+            , torch_dtype           = torch.float16
+            , load_safety_checker   = False
+            , controlnet            = controlnet
+        )
+    else:
+        pipe = StableDiffusionControlNetImg2ImgPipeline.from_pretrained(
+            model_path
+            , torch_dtype           = torch.float16
+            , safety_checker        = None
+            , controlnet            = controlnet
+        )
     
     return pipe
 
