@@ -12,7 +12,7 @@ from diffusers import (
     , StableDiffusionXLInpaintPipeline
 )
 from ..tools.sd_embeddings import get_weighted_text_embeddings_sdxl
-from ..tools.image_upscale import resize_img
+from ..tools.image_upscaler import resize_img
 
 def load_sdxl_pipe_from_file(model_path:str):
     '''
@@ -52,6 +52,27 @@ def load_sdxl_inpaint_pipe_from_file(model_path:str = "stabilityai/stable-diffus
     return sdxl_inpaint
 
 def load_sdxl_openpose_cn_pipe_from_pretrained(
+        base_model_id = "thibaud/controlnet-openpose-sdxl-1.0"
+        , model_id:str = "RunDiffusion/RunDiffusion-XL-Beta"
+    ):
+    sdxl_pose_controlnet = ControlNetModel.from_pretrained(
+        base_model_id
+        , torch_dtype=torch.float16
+    )
+
+    # load sdxl controlnet pipeline
+    sdxl_cn_pipe = StableDiffusionXLControlNetPipeline.from_pretrained(
+        model_id
+        , torch_dtype           = torch.float16
+        , use_safetensors       = True
+        , load_safety_checker   = False
+        , add_watermarker       = False
+        , controlnet            = sdxl_pose_controlnet
+    )
+    sdxl_cn_pipe.watermark = None
+    return sdxl_cn_pipe
+
+def load_sdxl_cn_pipe_from_pretrained(
         base_model_id = "thibaud/controlnet-openpose-sdxl-1.0"
         , model_id:str = "RunDiffusion/RunDiffusion-XL-Beta"
     ):
