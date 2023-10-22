@@ -16,27 +16,34 @@ class AZ_SD_SR:
     2. Then use SDXL image to image to upscale the image with the prompt
     3. Or use SD1.5 Tile control net to upscale the image. 
     '''
-    def __init__(self) -> None:
+    def __init__(self, model_id = "ViT-L-14/openai") -> None:
         # load clip-interrogator 
         # pip install git+https://github.com/openai/CLIP.git
         # pip install -U open-clip-torch
-        config_obj = Config(clip_model_path="ViT-L-14/openai")  # or ViT-H-14/laion2b_s32b_b79k
+        config_obj = Config(clip_model_path=model_id)  # or ViT-H-14/laion2b_s32b_b79k
         #config_obj.apply_low_vram_defaults()
         self.ci = Interrogator(
             config_obj
         )
+        self.__clear_cuda_cache()
 
-    def gen_prompt(self, image:Image) -> str:
+    def __clear_cuda_cache(self):
+        self.ci.blip_model.to("cpu")
+        self.ci.clip_model.to("cpu")
+        torch.cuda.empty_cache()
+
+    def __load_model_to_cuda(self):
         self.ci.blip_model.to("cuda:0")
         self.ci.clip_model.to("cuda:0")
 
+    def gen_prompt(self, image:Image) -> str:
+        self.__load_model_to_cuda()
         r = self.ci.interrogate(image)
-
-        self.ci.blip_model.to("cpu")
-        self.ci.clip_model.to("cpu")
-
-        torch.cuda.empty_cache()
+        self.__clear_cuda_cache()
         return r
+    
+    def test_func(self, msg):
+        print(msg)
 
 
 
