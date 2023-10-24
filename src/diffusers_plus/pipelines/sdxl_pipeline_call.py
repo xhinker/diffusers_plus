@@ -1,3 +1,4 @@
+import os
 import torch
 from diffusers import (
     StableDiffusionXLPipeline
@@ -12,7 +13,12 @@ from diffusers import (
     , StableDiffusionXLInpaintPipeline
 )
 from ..tools.sd_embeddings import get_weighted_text_embeddings_sdxl
-from ..tools.image_upscaler import resize_img
+from ..tools.image_upscaler_helper import resize_img
+
+import logging
+logging.basicConfig(format='[%(filename)s - Code line: %(lineno)d - %(levelname)s]: %(message)s',
+                    level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def load_sdxl_pipe_from_file(model_path:str):
     '''
@@ -93,6 +99,32 @@ def load_sdxl_cn_pipe_from_pretrained(
     sdxl_cn_pipe.watermark = None
     return sdxl_cn_pipe
 
+def load_sdxl_peft_lora(
+    pipe: StableDiffusionXLPipeline
+    , lora_info_list:list = []
+):
+    '''
+    lora_info_list = [
+        {
+            "lora_file_path":"/path/to/lora1.safetensors"
+            , "adapter_name":"custom unique lora name1"
+        }
+        , {
+            "lora_file_path":"/path/to/lora2.safetensors"
+            , "adapter_name":"custom unique lora name2"
+        }
+    ]
+    '''
+    for lora_item in lora_info_list:
+        lora_file_name = os.path.basename(lora_item["lora_file_path"])
+        pipe.load_lora_weights(
+            pretrained_model_name_or_path_or_dict = lora_item["lora_file_path"]
+            , weight_name = lora_file_name
+            , adapter_name = lora_item["adapter_name"]
+        )
+    logger.info(f"load {len(lora_info_list)} done.")
+    return pipe
+
 def sdxl_text2img(
     pipe
     , prompt:str
@@ -148,6 +180,7 @@ def sdxl_img2img(
     , cfg = 10
     , strength = 0.5
     , scheduler = EulerDiscreteScheduler
+    , cross_attention_kwargs = {}
 ):
     pipe.to("cuda")
     
@@ -178,11 +211,12 @@ def sdxl_img2img(
         , negative_prompt_embeds        = prompt_neg_embeds 
         , pooled_prompt_embeds          = pooled_prompt_embeds
         , negative_pooled_prompt_embeds = negative_pooled_prompt_embeds
-        , image                         = [resized_img]
+        , image                         = resized_img
         , strength                      = strength
         , guidance_scale                = cfg
         , num_inference_steps           = steps
         , generator = torch.Generator("cuda").manual_seed(seed)
+        , cross_attention_kwargs        = cross_attention_kwargs
     ).images[0]
 
     pipe.to("cpu")

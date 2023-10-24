@@ -257,6 +257,7 @@ def get_weighted_text_embeddings_sdxl(
     pipe: StableDiffusionXLPipeline
     , prompt : str      = ""
     , neg_prompt: str   = ""
+    , pad_last_block    = True
 ):
     """
     This function can process long prompt with weights, no length limitation 
@@ -365,21 +366,25 @@ def get_weighted_text_embeddings_sdxl(
     prompt_token_groups, prompt_weight_groups = group_tokens_and_weights(
         prompt_tokens.copy()
         , prompt_weights.copy()
+        , pad_last_block = pad_last_block
     )
     
     neg_prompt_token_groups, neg_prompt_weight_groups = group_tokens_and_weights(
         neg_prompt_tokens.copy()
         , neg_prompt_weights.copy()
+        , pad_last_block = pad_last_block
     )
     
     prompt_token_groups_2, prompt_weight_groups_2 = group_tokens_and_weights(
         prompt_tokens_2.copy()
         , prompt_weights_2.copy()
+        , pad_last_block = pad_last_block
     )
     
     neg_prompt_token_groups_2, neg_prompt_weight_groups_2 = group_tokens_and_weights(
         neg_prompt_tokens_2.copy()
         , neg_prompt_weights_2.copy()
+        , pad_last_block = pad_last_block
     )
         
     # get prompt embeddings one by one is not working. 

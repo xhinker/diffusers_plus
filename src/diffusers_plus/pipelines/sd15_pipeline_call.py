@@ -8,6 +8,7 @@ from diffusers import (
     , EulerDiscreteScheduler
 )
 from ..tools.sd_embeddings import get_weighted_text_embeddings_v15
+from PIL import Image
 
 class SD15:
     '''
@@ -53,7 +54,7 @@ def sd15_controlnet(
     , strength = 0.5
     , scheduler = EulerDiscreteScheduler
     , controlnet_conditioning_scale = 0.5
-):
+)-> Image:
     # if type(control_images) is not list:
     #     control_images = [control_images]
         

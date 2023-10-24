@@ -1,49 +1,341 @@
-#from SwinIR.models.network_swinir import SwinIR as net
+import os
 import torch
 from ..models.swin2sr.models.network_swin2sr import Swin2SR as net
 from ..models.swin2sr.utils import util_calculate_psnr_ssim as util
-from ..pipelines.sdxl_pipeline_call import (
+from .sdxl_pipeline_call import (
     load_sdxl_pipe_from_file
     , sdxl_img2img
+    , load_sdxl_img2img_pipe_from_file
+    , load_sdxl_peft_lora
+)
+from .sd15_pipeline_call import (
+    load_sd15_tile_cn_pipe_from_file
+    , sd15_controlnet
 )
 from PIL import Image
-from clip_interrogator import Config, Interrogator
+from ..models.clip_interrogator_az.clip_interrogator_az import Config, Interrogator
+from diffusers.utils import load_image
+from ..tools.sd_embeddings import (
+    get_weighted_text_embeddings_v15
+    , get_weighted_text_embeddings_sdxl
+)
+from diffusers import (
+    ControlNetModel
+    , StableDiffusionControlNetPipeline
+)
+from ..tools.image_upscaler_helper import (
+    resize_img
+)
 
+from ..tools.common_tools import FileOps
+import random
+
+from diffusers import (
+    EulerDiscreteScheduler
+    , EulerAncestralDiscreteScheduler
+)
+
+import regex as re
+
+import logging
+logging.basicConfig(format='[%(filename)s - Code line: %(lineno)d - %(levelname)s]: %(message)s',
+                    level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class AZ_SD_SR:
     '''
     1. Use clip-interrogator to extract prompt from an image
-    2. Then use SDXL image to image to upscale the image with the prompt
-    3. Or use SD1.5 Tile control net to upscale the image. 
+    2. Or use SD1.5 Tile control net to upscale the image. 
+
+    CN tile is good at add detail for low quality image under 1024x1024, 
+    when image size is too larger, the tile can only cover a small part of the image,
+    hence lead to weird image. 
+
+    Use SDXL img2img for even higher upscale.
+
+    ci 1 require transformers==4.26.1
+    ci 2 require
     '''
-    def __init__(self, model_id = "ViT-L-14/openai") -> None:
+    def __init__(
+            self
+            , clip_model_id = "ViT-L-14/openai"
+            , caption_model_name = "blip2-flan-t5-xl"
+            , sd15_base_model_file_path = ""
+            , sd15_lora_list = []
+            , sdxl_base_model_file_path = ""
+            , sdxl_lora_list = []
+        ) -> None:
         # load clip-interrogator 
         # pip install git+https://github.com/openai/CLIP.git
         # pip install -U open-clip-torch
-        config_obj = Config(clip_model_path=model_id)  # or ViT-H-14/laion2b_s32b_b79k
-        #config_obj.apply_low_vram_defaults()
-        self.ci = Interrogator(
-            config_obj
-        )
-        self.__clear_cuda_cache()
+        self.config_obj = Config(
+            clip_model_path = clip_model_id
+            , caption_model_name = caption_model_name
+            , caption_max_length = 128
+        )  # or ViT-H-14/laion2b_s32b_b79k
+        # set ci handler
+        self.ci = None
+        # set cn_pipe handler
+        self.sd15_cn_pipe = None
+        # set sd15 model file path 
+        self.sd15_base_model_file_path = sd15_base_model_file_path
+        self.sd15_lora_list = sd15_lora_list
+        self.sd15_model_name,_ = os.path.splitext(os.path.basename(sd15_base_model_file_path))
+
+        # set sdxl img2img pipe
+        self.sdxl_img2img_pipe = None
+        # set sdxl model file path 
+        self.sdxl_base_model_file_path = sdxl_base_model_file_path
+        self.sdxl_lora_list = sdxl_lora_list
+        self.sdxl_model_name,_ = os.path.splitext(os.path.basename(sdxl_base_model_file_path))
 
     def __clear_cuda_cache(self):
-        self.ci.blip_model.to("cpu")
+        self.ci.caption_model.to("cpu")
         self.ci.clip_model.to("cpu")
         torch.cuda.empty_cache()
 
     def __load_model_to_cuda(self):
-        self.ci.blip_model.to("cuda:0")
+        self.ci.caption_model.to("cuda:0")
         self.ci.clip_model.to("cuda:0")
 
+    def __remove_emojis(self, input_text:str)->str:
+        emoj = re.compile("["
+            u"\U0001F600-\U0001F64F"  # emoticons
+            u"\U0001F300-\U0001F5FF"  # symbols & pictographs
+            u"\U0001F680-\U0001F6FF"  # transport & map symbols
+            u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
+            u"\U00002500-\U00002BEF"  # chinese char
+            u"\U00002702-\U000027B0"
+            u"\U000024C2-\U0001F251"
+            u"\U0001f926-\U0001f937"
+            u"\U00010000-\U0010ffff"
+            u"\u2640-\u2642" 
+            u"\u2600-\u2B55"
+            u"\u200d"
+            u"\u23cf"
+            u"\u23e9"
+            u"\u231a"
+            u"\ufe0f"  # dingbats
+            u"\u3030"
+                        "]+", re.UNICODE)
+        return re.sub(emoj, '', input_text)
+
     def gen_prompt(self, image:Image) -> str:
+        if self.ci is None:
+            self.ci = Interrogator(
+                self.config_obj
+            )
+            #self.__clear_cuda_cache()
+
         self.__load_model_to_cuda()
-        r = self.ci.interrogate(image)
+        prompt = self.ci.interrogate(image)
+
+        prompt_wo_emojis = self.__remove_emojis(prompt)
+
+        neg_prompt = self.ci.interrogate_negative(image)
+
         self.__clear_cuda_cache()
-        return r
+        return prompt_wo_emojis, neg_prompt
+
+    def sd15_tile_upscale(
+        self
+        , image_path:str
+        , upscale:float = 2.0
+        , user_prompt:str = ""
+        , user_neg_prompt:str = ""
+        , steps = 40
+        , cfg = 7
+        , strength = 0.75
+        , controlnet_weight = 0.75
+        , save_image:bool = False
+    ):
+        '''
+        Usage sample:
+            from diffusers_plus.pipelines.image_upscaler_pipeline import AZ_SD15_SR
+            azsdsr = AZ_SD15_SR(
+                sd_base_model_file_path = "/path/to/model.safetensors"
+            )
+            image_path = "<path>"
+            r = azsdsr.sd15_tile_upscale(
+                image_path          = image_path
+                , user_prompt       = ""
+                , user_neg_prompt   = ""
+                , steps             = 40
+                , upscale           = 4
+                , strength          = 0.85
+                , controlnet_weight = 0.75
+                , cfg               = 7.5
+            )
+            r
+        '''
+        if self.sd15_cn_pipe is None:
+            self.sd15_cn_pipe = load_sd15_tile_cn_pipe_from_file(
+                model_path = self.sd15_base_model_file_path
+            )
+
+        # resize input image
+        resized_img = resize_img(img_path = image_path, upscale_times = upscale)
+
+        # get prompt
+        gen_prompt, gen_neg_prompt = self.gen_prompt(image = resized_img)
+
+        pre_defined_prompt = "masterpiece, ultra-detailed, high resolution, best quality,8k, sharp focus, raw photo, flawless, perfect"
+        prompt = f"{pre_defined_prompt},{user_prompt},{gen_prompt}"
+
+        pre_defined_neg_prompt = "mosaic,noise spot,blur,low quality,mutated,low res,low resolution,ugly,bad taste, pexels,bad anatomy"
+        neg_prompt = f"{user_neg_prompt}, {pre_defined_neg_prompt}, {gen_neg_prompt}"
+
+        print(f"prompt:{prompt}")
+        print(f"neg_prompt:{neg_prompt}")
+
+        # run pipe
+        r = sd15_controlnet(
+            pipe                            = self.sd15_cn_pipe
+            , original_image                = resized_img
+            , control_image                 = resized_img
+            , prompt                        = prompt
+            , neg_prompt                    = neg_prompt
+            , steps                         = steps
+            , cfg                           = cfg
+            , strength                      = strength
+            , controlnet_conditioning_scale = controlnet_weight
+        )
+
+        # save image
+        image_save_path = ""
+        if save_image:
+            sd_meta = {
+                "prompt":prompt
+                , "neg_prompt":neg_prompt
+                , "steps": steps
+                , "cfg": cfg
+                , "strength": strength
+                , "controlnet_conditioning_scale": controlnet_weight
+                , "upscale": upscale
+            }
+            new_image_path = FileOps.get_new_image_path(
+                image_path
+                , additional_info=[
+                    "sd15_tile"
+                    , "steps_"+str(sd_meta["steps"])
+                    , "cfg_"+str(sd_meta["cfg"])
+                    , "strength_"+str(sd_meta["strength"])
+                    , "cn_"+str(sd_meta["controlnet_conditioning_scale"])
+                    , "upscale_"+str(sd_meta["upscale"])
+                ]
+            )
+            image_save_path = FileOps.save_image_with_info(
+                image = r
+                , image_save_path = new_image_path
+                , json_obj_dict = {"sd_meta": sd_meta}
+            )
+
+        return r, image_save_path
+    
+    def sdxl_img_upscale(
+        self
+        , image_path:str
+        , upscale:float = 2.0
+        , user_prompt:str = ""
+        , user_neg_prompt:str = ""
+        , steps = 40
+        , cfg = 4
+        , strength = 0.4
+        , save_image:bool = False
+        , seed:int = None
+        , scheduler = EulerAncestralDiscreteScheduler
+        , lora_weights = ()             # a tuple (['name1','name2'],[0.5,0.6])
+    ):
+        # load sdxl_img2img_pipe is not exists
+        if self.sdxl_img2img_pipe is None:
+            self.sdxl_img2img_pipe = load_sdxl_img2img_pipe_from_file(
+                model_path = self.sdxl_base_model_file_path
+            )
+            load_sdxl_peft_lora(
+                pipe = self.sdxl_img2img_pipe
+                , lora_info_list = self.sdxl_lora_list
+            )
+            logger.info("load up SDXL image2image pipe and LoRAs")
+            
+        
+        # resize input image
+        #resized_img = resize_img(img_path = image_path, upscale_times = upscale)
+        image = load_image(image_path).convert("RGB")
+
+        # get prompt
+        gen_prompt, gen_neg_prompt = self.gen_prompt(image = image)
+        
+        pre_defined_prompt = "masterpiece, ultra-detailed, high resolution, best quality,8k, sharp focus, raw photo, flawless, perfect"
+        prompt = f"{pre_defined_prompt},{user_prompt},{gen_prompt}"
+
+        pre_defined_neg_prompt = "mosaic,noise spot,blur,low quality,mutated,low res,low resolution,ugly,bad taste, pexels,bad anatomy"
+        neg_prompt = f"{user_neg_prompt}, {pre_defined_neg_prompt}, {gen_neg_prompt}"
+
+        print(f"prompt:{prompt}")
+        print(f"neg_prompt:{neg_prompt}")
+
+        if seed is None:
+            seed = random.randint(0,10000000000000)
+
+        # set lora
+        if len(lora_weights)>0:
+            self.sdxl_img2img_pipe.set_adapters(
+                lora_weights[0]
+                , adapter_weights = lora_weights[1]
+            )
+
+        lora_scale = {
+            "scale":1.0
+        }
+        r = sdxl_img2img(
+            pipe                     = self.sdxl_img2img_pipe
+            , input_image            = image
+            , prompt                 = prompt
+            , neg_prompt             = neg_prompt
+            , resize_times           = upscale
+            , seed                   = seed
+            , steps                  = steps
+            , cfg                    = cfg
+            , strength               = strength
+            , scheduler              = scheduler
+            , cross_attention_kwargs = lora_scale
+        )
+
+        # save image
+        image_save_path = ""
+        if save_image:
+            sd_meta = {
+                "model_name": self.sdxl_model_name
+                ,"prompt":prompt
+                , "neg_prompt":neg_prompt
+                , "steps": steps
+                , "cfg": cfg
+                , "strength": strength
+                , "upscale": upscale
+                , "seed":seed
+                , "scheduler": scheduler.__name__
+            }
+            new_image_path = FileOps.get_new_image_path(
+                image_path
+                , additional_info=[
+                    "sdxl_img2img"
+                    , "steps_"+str(sd_meta["steps"])
+                    , "cfg_"+str(sd_meta["cfg"])
+                    , "strength_"+str(sd_meta["strength"])
+                    , "upscale_"+str(sd_meta["upscale"])
+                ]
+            )
+            image_save_path = FileOps.save_image_with_info(
+                image = r
+                , image_save_path = new_image_path
+                , json_obj_dict = {"sd_meta": sd_meta}
+            )
+        
+        return r, image_save_path
     
     def test_func(self, msg):
         print(msg)
+
 
 
 
