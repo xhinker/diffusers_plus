@@ -2,7 +2,7 @@ from setuptools import setup,find_packages
 
 setup(
     name='diffusers_plus',
-    version='1.231023.1',
+    version='1.231124.3',
     license='Apache License',
     author="Andrew Zhu",
     author_email='xhinker@hotmail.com',
@@ -15,4 +15,5 @@ setup(
         ,'diffusers'
         , 'opencv-python'
     ],
+    include_package_data=True
 )

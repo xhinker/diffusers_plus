@@ -1,0 +1,1 @@
+recursive-include src/diffusers_plus/models/clip_interrogator_az/data *.txt
