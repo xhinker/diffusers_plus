@@ -11,3 +11,6 @@
 ## Idea of loading multiple LoRAs
 
 Merge the LoRA state dict and network_alphas first, then update the pipeline text encoder and unet
+
+
+test
