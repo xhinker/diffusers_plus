@@ -2,7 +2,7 @@ import torch
 from ..models.annotator.openpose import OpenposeDetector
 from diffusers.utils import load_image
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
 from diffusers.utils.pil_utils import pt_to_pil,numpy_to_pil
 from transformers import CLIPSegProcessor,CLIPSegForImageSegmentation
 from controlnet_aux import CannyDetector, PidiNetDetector, HEDdetector
@@ -92,11 +92,33 @@ def get_mask_pil(
     bw_mask_pil = mask_pil.convert("L").point(bw_fn, mode="1")
     return mask_pil, bw_mask_pil
 
-
 def get_masked_image(source_image:Image, bw_mask:Image):
     image_2 = Image.new("RGBA", source_image.size, (0,0,0,0))
     return Image.composite(source_image,image_2, bw_mask)
-    
+
+def remove_background(source_image:Image, threashold:int = 100):
+    '''
+    Remove the background base on the bw_mask
+    '''
+    prompt = "background"
+    _, bw_mask = get_mask_pil(
+        target_prompt   = prompt
+        , target_image  = source_image
+        , bw_thresh    = threashold
+    )
+
+    output_image = Image.new("RGBA", source_image.size, (255,255,255,255))
+    inverse_bw_mask_pil = ImageOps.invert(bw_mask)
+    r = Image.composite(source_image ,output_image, inverse_bw_mask_pil)
+    return r
+
+def remove_background_rembg(source_image:Image):
+    from rembg import remove
+    white_bg = Image.new("RGBA", source_image.size, (255,255,255))
+    image_wo_bg = remove(source_image)
+    output_image = Image.alpha_composite(white_bg, image_wo_bg)
+    return output_image
+
 
 def get_object_w_prompt(source_img:Image, prompt:str, bw_thresh = 100):
     # get mask

@@ -60,10 +60,12 @@ def load_sdxl_inpaint_pipe_from_file(model_path:str = "stabilityai/stable-diffus
 def load_sdxl_openpose_cn_pipe_from_pretrained(
         base_model_id = "thibaud/controlnet-openpose-sdxl-1.0"
         , model_id:str = "RunDiffusion/RunDiffusion-XL-Beta"
+        , cache_dir:str = "/home/andrewzhu/storage_1t_1/sd_models"
     ):
     sdxl_pose_controlnet = ControlNetModel.from_pretrained(
         base_model_id
         , torch_dtype=torch.float16
+        , cache_dir             = cache_dir
     )
 
     # load sdxl controlnet pipeline
@@ -74,6 +76,7 @@ def load_sdxl_openpose_cn_pipe_from_pretrained(
         , load_safety_checker   = False
         , add_watermarker       = False
         , controlnet            = sdxl_pose_controlnet
+        , cache_dir             = cache_dir
     )
     sdxl_cn_pipe.watermark = None
     return sdxl_cn_pipe
@@ -81,6 +84,7 @@ def load_sdxl_openpose_cn_pipe_from_pretrained(
 def load_sdxl_cn_pipe_from_pretrained(
         base_model_id = "thibaud/controlnet-openpose-sdxl-1.0"
         , model_id:str = "RunDiffusion/RunDiffusion-XL-Beta"
+        , cache_dir:str = "/home/andrewzhu/storage_1t_1/sd_models"
     ):
     sdxl_pose_controlnet = ControlNetModel.from_pretrained(
         base_model_id
@@ -95,6 +99,7 @@ def load_sdxl_cn_pipe_from_pretrained(
         , load_safety_checker   = False
         , add_watermarker       = False
         , controlnet            = sdxl_pose_controlnet
+        , cache_dir             = cache_dir
     )
     sdxl_cn_pipe.watermark = None
     return sdxl_cn_pipe
