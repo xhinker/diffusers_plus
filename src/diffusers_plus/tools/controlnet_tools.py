@@ -143,7 +143,10 @@ def get_width_height(width, height):
     return width,height 
 
 def resize_img(img_path,upscale_times):
-    img             = load_image(img_path)
+    if isinstance(img_path, str):
+        img             = load_image(img_path)
+    else:
+        img = img_path
     if upscale_times <=0:
         return img
     width,height    = img.size
