@@ -14,6 +14,7 @@ setup(
         'transformers'
         ,'diffusers'
         , 'opencv-python'
+        , 'matplotlib'
     ],
     include_package_data=True
 )
