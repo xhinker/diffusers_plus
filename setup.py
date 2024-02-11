@@ -2,7 +2,7 @@ from setuptools import setup,find_packages
 
 setup(
     name='diffusers_plus',
-    version='1.240211.1',
+    version='1.240211.2',
     license='Apache License',
     author="Andrew Zhu",
     author_email='xhinker@hotmail.com',
@@ -15,6 +15,8 @@ setup(
         ,'diffusers'
         , 'opencv-python'
         , 'matplotlib'
+        , 'scikit-image'
+        , 'controlnet_aux'
     ],
     include_package_data=True
 )
